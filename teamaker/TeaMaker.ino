@@ -21,11 +21,24 @@ LiquidCrystal_I2C	lcd(LCD_I2C_ADDR,En_pin,Rw_pin,Rs_pin,D4_pin,D5_pin,D6_pin,D7_
 
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 
-#define RELAY1_PIN  2   // Positive Pump Terminal
-#define RELAY2_PIN  3   // Negative Pump Terminal 
-#define RELAY3_PIN  4   // Pump Power ON/OFF
-#define RELAY4_PIN  5   // Stove Power ON/OFF
+#define RELAY1_PIN  4   // Positive Pump Terminal
+#define RELAY2_PIN  5   // Negative Pump Terminal 
+#define RELAY3_PIN  6   // Pump Power ON/OFF
+#define RELAY4_PIN  7   // Stove Power ON/OFF
 #define STRAINER_SERVO_PIN 8
+
+#define SET_ALARM_PIN 9
+#define TEA_NOW_VS_ALARM_MODE_PIN 10
+#define CLEANER_HOUR_MODE_PIN 11
+#define EGG_MODE_MINUTE_PIN 12
+#define TIME_INTERRUPT_PIN 2
+#define STATE_INTERRUPT_PIN 3
+
+
+#define DAY 1
+#define MONTH 1
+#define YEAR 2014
+#define INTERRUPT_BUTTON_DELAY 16000
 
 #define ULONG_MAX ((1 << 31) - 1)
 
@@ -42,27 +55,33 @@ OneWire ds(DS18S20_PIN);
 
 enum State {
   SLEEP = 0,
-  START= 1,
+  START_TEA= 1,
   DISPENSE_MILK = 2,
   CONTROL_STRAINER = 3,
   CHECK_TEMP = 4,
   START_STEEPING = 5,
-  REFRESH_LCD = 6,
-  DONE = 7
+  CLEAN = 6,
+  BOIL_EGG = 7,
+  REFRESH_LCD = 8,
+  DONE = 9
 };
 
-static const int num_states = 8;
+static const int num_states = 10;
 const State kStateState = SLEEP;
 const State kEndState = DONE;
 
-bool active_states[num_states];
-unsigned long loop_delay;
+volatile bool active_states[num_states];
+volatile unsigned long loop_delay;
+// Button debounce
+long time_lastDebounceTime = 0;  // the last time the output pin was toggled
+long debounceDelay = 100;   
+long state_lastDebounceTime = 0;  // the last time the output pin was toggled
 
 struct SleepData {
-  int wakeup_hour;
-  int wakeup_minute;
+  volatile int wakeup_hour;
+  volatile int wakeup_minute;
 };
-SleepData sleep_data;
+volatile SleepData sleep_data;
 
 struct StrainerData {
   static const int high_pos = 0;
@@ -110,8 +129,7 @@ struct MilkPumpData {
   static const unsigned long duration_per_cup = 1000; // TODO 600000;
   static const unsigned long forward_prime_duration = 1000; // 50000;
   static const unsigned long reverse_prime_duration = 1000; // 40000;
-  static const int num_cups = 2;
-
+  volatile int num_cups;
   bool is_on;
   bool is_forward;
   bool forward_done;
@@ -122,6 +140,21 @@ struct MilkPumpData {
   unsigned long next_check_time;
 };
 MilkPumpData milk_pump_data;
+
+struct EggData {
+  static const unsigned long boil_time_base = 600000;
+  static const unsigned long boil_time_per_egg = 60000;
+  static const int num_eggs = 1;
+  unsigned long start;
+};
+EggData egg_data; 
+
+struct CleanerData {
+  static const unsigned long forward_run_time = 60000;
+  static const unsigned long reverse_run_time = 5000;
+  static const int num_cycles = 3;
+};
+CleanerData cleaner_data; 
 
 void resetMilkPumpData() {
   stopPump();
@@ -142,32 +175,66 @@ void setDelay(unsigned long newdelay) {
 void turnStoveOn() {
   digitalWrite(RELAY4_PIN, LOW);
   stove_data.is_on = true;
-  Serial.println("Stove ON");
+  if (DEBUG) {
+    Serial.println("Stove ON");
+  }
 }
 
 void turnStoveOff() {
   digitalWrite(RELAY4_PIN, HIGH);
   stove_data.is_on = false;
-  Serial.println("Stove OFF");
+  if (DEBUG) {
+    Serial.println("Stove OFF");
+  }
 }
 
 void runPumpForward() {
   digitalWrite(RELAY1_PIN, LOW); // Runs Pump in forward direction
   digitalWrite(RELAY2_PIN, LOW); 
   digitalWrite(RELAY3_PIN, LOW); 
-  Serial.println("Pump F");
+  if (DEBUG) {
+    Serial.println("Pump F");
+  }
 }
 
 void runPumpBackward() {
   digitalWrite(RELAY1_PIN, HIGH);  // Runs Pump in reverse direction.
   digitalWrite(RELAY2_PIN, HIGH); 
   digitalWrite(RELAY3_PIN, LOW); 
-  Serial.println("Pump R");
+  if (DEBUG) {
+    Serial.println("Pump R");
+  }
 }
 
 void stopPump() {
   digitalWrite(RELAY3_PIN, HIGH);
-  Serial.println("Pump Off"); 
+  if (DEBUG) {
+    Serial.println("Pump Off"); 
+  }
+}
+
+void initButtonPin(int pin_num) {
+  pinMode(pin_num, INPUT);
+  digitalWrite(pin_num, HIGH);
+}
+
+bool isButtonPressed(int pin_num) {
+  int buttonState = digitalRead(pin_num);
+  if (DEBUG && (buttonState == LOW)) {
+    Serial.print("Button Pressed");
+    Serial.println(pin_num, DEC);
+  }
+  return buttonState == LOW;
+}
+
+void Init() {
+  stopPump();
+  turnStoveOff();
+  for (int i = 0; i < num_states; ++i) {
+    active_states[i] = false;
+  }
+  active_states[REFRESH_LCD] = true;
+  active_states[SLEEP] = true;
 }
 
 void setup()
@@ -178,19 +245,21 @@ void setup()
   pinMode(RELAY2_PIN, OUTPUT);
   pinMode(RELAY3_PIN, OUTPUT);
   pinMode(RELAY4_PIN, OUTPUT);
-  mlx.begin(); 
-  stopPump();
-  turnStoveOff();
+  initButtonPin(SET_ALARM_PIN);
+  initButtonPin(TEA_NOW_VS_ALARM_MODE_PIN);
+  initButtonPin(CLEANER_HOUR_MODE_PIN);
+  initButtonPin(EGG_MODE_MINUTE_PIN);
+  pinMode(TIME_INTERRUPT_PIN, INPUT_PULLUP);
+  pinMode(STATE_INTERRUPT_PIN, INPUT_PULLUP);
 
+
+  mlx.begin(); 
   strainer_servo.attach(STRAINER_SERVO_PIN);  // attaches the servo on pin 9 to the servo object  
   strainer_servo.write(strainer_data.high_pos); 
-  strainer_servo.detach(STRAINER_SERVO_PIN);
-  for (int i = 0; i < num_states; ++i) {
-    active_states[i] = false;
-  }
-  active_states[REFRESH_LCD] = true;
-  active_states[SLEEP] = true;
-  setTime(6, 9, 55, 27, 11, 2014);
+  strainer_servo.detach();
+
+  milk_pump_data.num_cups = 1;
+  setTime(6, 8, 55, DAY, MONTH, YEAR);
   sleep_data.wakeup_hour = 6;
   sleep_data.wakeup_minute = 10;
 
@@ -199,12 +268,17 @@ void setup()
   lcd.setBacklightPin(BACKLIGHT_PIN,POSITIVE);
   lcd.setBacklight(LOW);
   lcd.home (); // go home
-  lcd.clear();
+  Init();
+  lcd.clear(); // For some reason, this doesnt seem to work in an ISR.
+  //Interrupts
+  attachInterrupt(0, timeInterrupt, FALLING); // Connect the set time button to pin 2 on Uno and 3 on leonardo
+  attachInterrupt(1, stateInterrupt, FALLING);  // Connect the set state button to pin 3 on Uno and 2 on leonardo
 }
 
 void loop()
 {
   loop_delay = 1000;
+  //loop_delay = 600000;
   for (int state_int = kStateState; state_int <= kEndState; ++state_int) {
     State state = static_cast<State>(state_int);
     if (!active_states[state]) {
@@ -217,17 +291,12 @@ void loop()
       }
       if (shouldIWakeUp()) {
         active_states[SLEEP] = false;
-        active_states[START] = true;
-        lcd.clear();
-      } 
-      else {
-        loop_delay = 10000;
-        // loop_delay = 600000; TODO (replace with aboce.)
+        active_states[START_TEA] = true;
       }
       break;
-    case START:
+    case START_TEA:
       if (DEBUG) {
-        Serial.println("START");
+        Serial.println("START_TEA");
       }
       resetMilkPumpData();
       resetStrainerData();
@@ -238,10 +307,11 @@ void loop()
       turnStoveOn();
       stove_data.should_keep_on = true;
       stove_data.start_millis = millis();
-      active_states[START] = false;
+      active_states[START_TEA] = false;
       active_states[DISPENSE_MILK] = true;
       active_states[CHECK_TEMP] = true;
       active_states[CONTROL_STRAINER] = true;
+      lcd.clear();
       lcd.setBacklight(HIGH); 
       break;
     case DISPENSE_MILK:
@@ -379,75 +449,50 @@ void loop()
         active_states[START_STEEPING] = false;
       }
       break;
+    case CLEAN:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("    Cleaning");
+      for (int i = 0 ; i < cleaner_data.num_cycles; ++i) {
+        runPumpForward();
+        delay(cleaner_data.forward_run_time);
+        runPumpBackward();
+        delay(cleaner_data.reverse_run_time);
+      }
+      stopPump();
+      active_states[CLEAN] = false;
+      active_states[SLEEP] = true;
+      lcd.clear();
+      break;
+    case BOIL_EGG:
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Boiling 'A' Egg");
+      turnStoveOn();
+      delay(egg_data.boil_time_base + (egg_data.num_eggs * egg_data.boil_time_per_egg));
+      turnStoveOff();
+      active_states[BOIL_EGG] = false;
+      active_states[SLEEP] = true;
+      lcd.clear();
+      break;
     case REFRESH_LCD:
       if (DEBUG) {
         Serial.println("REFRESH_LCD");
       }
       {
-        time_t time_now = now();
-        int curr_hour = hour(time_now);
-        int curr_minute = minute(time_now);
         if (active_states[SLEEP]) {
-          // No tea making in progress.
-          // Print, Time, Alarm Time, 
-          lcd.setCursor(0,0);
-          lcd.print("Time : ");
-          printTime(0, 7, curr_hour, curr_minute);
-          lcd.setCursor(0, 1);
-          lcd.print("Alarm: ");
-          printTime(1, 7, sleep_data.wakeup_hour, sleep_data.wakeup_minute);
+          printSleepLCD();
         } 
-        else {
-          printTime(0, 0, curr_hour, curr_minute);
-          lcd.setCursor(6, 0);
-          unsigned int temp_int = static_cast<unsigned int>(stove_data.temperature);
-          lcd.print(temp_int, DEC);
-          lcd.print("*C");
-          printMillis(0, 11, millis() - stove_data.start_millis);
-          lcd.setCursor(0, 1);
-          if (stove_data.is_on) {
-            lcd.print("Y");
-          } 
-          else {
-            lcd.print("N");
-          }
-          if ( strainer_data.is_lowered) {
-            printMillis(1, 2, millis() - strainer_data.lowered_millis);
-          }
-          lcd.setCursor(8,1);
-          if (active_states[DISPENSE_MILK]) {
-            lcd.print("P");
-          } 
-          else {
-            lcd.print(" ");
-          }
-          lcd.setCursor(10,1);
-          if (active_states[CHECK_TEMP]) {
-            lcd.print("T");
-          } 
-          else {
-            lcd.print(" ");
-          }
-          lcd.setCursor(12,1);
-          if (active_states[CONTROL_STRAINER]) {
-            lcd.print("S");
-          } 
-          else {
-            lcd.print(" ");
-          }
-          lcd.setCursor(14,1);
-          if (active_states[DONE]) {
-            lcd.print("D");
-          } 
-          else {
-            lcd.print(" ");
-          }
-        }
+        else if (active_states[CHECK_TEMP]){
+          printTeaMakingLCD();
+        } 
         setDelay(60000);
       }
-      break;
+      break;  
     case DONE:
-      Serial.println("DONE");
+      if (DEBUG) {
+        Serial.println("DONE");
+      }
       strainer_data.sign = DIR_UP;
       while (strainer_data.current_pos > strainer_data.high_pos) {
         strainer_data.current_pos += (strainer_data.dx * strainer_data.sign) ;
@@ -465,12 +510,80 @@ void loop()
         active_states[REFRESH_LCD] = true;
         lcd.clear();
         lcd.setBacklight(LOW); 
-        strainer_servo.detach(STRAINER_SERVO_PIN);
+        strainer_servo.detach();
       }
       break;
     }
   }
   delay(loop_delay);
+}
+
+void printSleepLCD() {
+  time_t time_now = now();
+  int curr_hour = hour(time_now);
+  int curr_minute = minute(time_now);
+  // No tea making in progress.
+  // Print, Time, Alarm Time, 
+  lcd.setCursor(0,0);
+  lcd.print("Time : ");
+  printTime(0, 7, curr_hour, curr_minute);
+  lcd.setCursor(15, 0);
+  lcd.print(milk_pump_data.num_cups, DEC);
+  lcd.setCursor(0, 1);
+  lcd.print("Alarm: ");
+  printTime(1, 7, sleep_data.wakeup_hour, sleep_data.wakeup_minute);
+  lcd.setCursor(13, 1);
+  lcd.print("Cup");
+}
+
+void printTeaMakingLCD() {
+  time_t time_now = now();
+  int curr_hour = hour(time_now);
+  int curr_minute = minute(time_now);
+  printTime(0, 0, curr_hour, curr_minute);
+  lcd.setCursor(6, 0);
+  unsigned int temp_int = static_cast<unsigned int>(stove_data.temperature);
+  lcd.print(temp_int, DEC);
+  lcd.print("*C");
+  printMillis(0, 11, millis() - stove_data.start_millis);
+  lcd.setCursor(0, 1);
+  if (stove_data.is_on) {
+    lcd.print("Y");
+  } 
+  else {
+    lcd.print("N");
+  }
+  if ( strainer_data.is_lowered) {
+    printMillis(1, 2, millis() - strainer_data.lowered_millis);
+  }
+  lcd.setCursor(8,1);
+  if (active_states[DISPENSE_MILK]) {
+    lcd.print("P");
+  } 
+  else {
+    lcd.print(" ");
+  }
+  lcd.setCursor(10,1);
+  if (active_states[CHECK_TEMP]) {
+    lcd.print("T");
+  } 
+  else {
+    lcd.print(" ");
+  }
+  lcd.setCursor(12,1);
+  if (active_states[CONTROL_STRAINER]) {
+    lcd.print("S");
+  } 
+  else {
+    lcd.print(" ");
+  }
+  lcd.setCursor(14,1);
+  if (active_states[DONE]) {
+    lcd.print("D");
+  } 
+  else {
+    lcd.print(" ");
+  }
 }
 
 void printMillis(int x, int y, unsigned long ms) {
@@ -497,25 +610,97 @@ void printTwoDigitToLCD(int val) {
 }
 
 bool shouldIWakeUp() {
-  time_t time_now = now();
-  int curr_hour = hour(time_now);
-  int curr_minute = minute(time_now);
-  Serial.print(curr_hour);
-  Serial.print(":");
-  Serial.print(curr_minute);
-  Serial.print("  ");
-  Serial.print(sleep_data.wakeup_hour);
-  Serial.print(":");
-  Serial.println(sleep_data.wakeup_minute);
-
-  int delta = ((curr_hour * 60 + curr_minute) - (sleep_data.wakeup_hour * 60 + sleep_data.wakeup_minute));
-  if (delta >= 0 && delta < 4) {
-    return true;
+  if (!(sleep_data.wakeup_hour == 0 && sleep_data.wakeup_minute == 0)) {
+    time_t time_now = now();
+    int curr_hour = hour(time_now);
+    int curr_minute = minute(time_now);
+    int delta = ((curr_hour * 60 + curr_minute) - (sleep_data.wakeup_hour * 60 + sleep_data.wakeup_minute));
+    if (delta >= 0 && delta < 4) {
+      return true;
+    }
   }
   return false;
 }
 
+void stateInterrupt() {
+  if ((millis() - state_lastDebounceTime) > debounceDelay) {
+    state_lastDebounceTime = millis();
+    if (DEBUG) {
+      Serial.println("State Interrupt");
+    }
+    if (isButtonPressed(TEA_NOW_VS_ALARM_MODE_PIN)) {
+      Init();
+      active_states[SLEEP] = false;
+      active_states[START_TEA] = true;
+      loop_delay = 1000;
+    } 
+    else if (isButtonPressed(CLEANER_HOUR_MODE_PIN)) {
+      Init();
+      active_states[SLEEP] = false;
+      active_states[CLEAN] = true;
+      loop_delay = 1000;
+    } 
+    else if (isButtonPressed(EGG_MODE_MINUTE_PIN)) {
+      Init();
+      active_states[SLEEP] = false;
+      active_states[BOIL_EGG] = true;
+      loop_delay = 1000;
+    }
+  }
+}
 
+void timeInterrupt() {
+  if ((millis() - time_lastDebounceTime) > debounceDelay) {
+    time_lastDebounceTime = millis();
+    if (DEBUG) {
+      Serial.println("Time Interrupt");
+    }
+    if (isButtonPressed(TEA_NOW_VS_ALARM_MODE_PIN)) {
+      if (milk_pump_data.num_cups == 1) {
+        milk_pump_data.num_cups = 2;
+      } 
+      else {
+        milk_pump_data.num_cups = 1;
+      }
+    }
+
+    if (isButtonPressed(SET_ALARM_PIN)) {
+      setAlarm();
+      loop_delay = 1000;
+    } 
+    else {
+      setTime();
+      loop_delay = 1000;
+    }
+  }
+}
+
+void setTime() {
+  if (isButtonPressed(CLEANER_HOUR_MODE_PIN)) {
+    time_t time_now = now();
+    int c_hour = hour(time_now);
+    int c_min = minute(time_now);
+    c_hour = (c_hour + 1) % 24;
+    setTime(c_hour, c_min, 0, DAY, MONTH, YEAR);
+  }
+
+  if (isButtonPressed(EGG_MODE_MINUTE_PIN)) {
+    time_t time_now = now();
+    int c_hour = hour(time_now);
+    int c_min = minute(time_now);
+    c_min = (c_min + 1) % 60;
+    setTime(c_hour, c_min, 0, DAY, MONTH, YEAR);
+  }
+}
+
+void setAlarm() {
+  if (isButtonPressed(CLEANER_HOUR_MODE_PIN)) {
+    sleep_data.wakeup_hour = (sleep_data.wakeup_hour + 1) % 24;
+  }
+  if (isButtonPressed(EGG_MODE_MINUTE_PIN)) {
+    sleep_data.wakeup_minute = (sleep_data.wakeup_minute + 1) % 60;
+  }
+}
 
 float getTemp(){
   //returns the temperature from one DS18S20 in DEG Celsius
@@ -561,3 +746,6 @@ float getTemp(){
   float TemperatureSum = tempRead / 16;
   return TemperatureSum;
 }
+
+
+
