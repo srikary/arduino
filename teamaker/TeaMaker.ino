@@ -7,7 +7,7 @@
 
 // BEGIN LCD Config Params
 #define LCD_I2C_ADDR    0x27 // <<----- Add your address here.  Find it from I2C Scanner
-LiquidCrystal_I2C lcd(LCD_I2C_ADDR,16,4);  // set the LCD address to 0x27 for a 20 chars and 4 line display
+LiquidCrystal_I2C lcd(LCD_I2C_ADDR,16,2);  // set the LCD address to 0x27 for a 20 chars and 4 line display
 
 
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
@@ -64,9 +64,9 @@ const State kEndState = DONE;
 volatile bool active_states[num_states];
 volatile unsigned long loop_delay;
 // Button debounce
-long time_lastDebounceTime = 0;  // the last time the output pin was toggled
+volatile long time_lastDebounceTime = 0;  // the last time the output pin was toggled
 long debounceDelay = 100;   
-long state_lastDebounceTime = 0;  // the last time the output pin was toggled
+volatile long state_lastDebounceTime = 0;  // the last time the output pin was toggled
 
 struct SleepData {
   volatile int wakeup_hour;
@@ -631,7 +631,6 @@ void stateInterrupt() {
       loop_delay = 1000;
     }  
     else if (isButtonPressed(EGG_MODE_MINUTE_PIN)) {
-      Init();
       active_states[SLEEP] = false;
       active_states[BOIL_EGG] = true;
       loop_delay = 1000;
@@ -655,13 +654,13 @@ void timeInterrupt() {
       loop_delay = 1000;
     } 
     else {
-      setTime();
+      setTimeHelper();
       loop_delay = 1000;
     }
   }
 }
 
-void setTime() {
+void setTimeHelper() {
   if (isButtonPressed(CLEANER_HOUR_MODE_PIN)) {
     time_t time_now = now();
     int c_hour = hour(time_now);
