@@ -217,10 +217,6 @@ void initButtonPin(int pin_num) {
 
 bool isButtonPressed(int pin_num) {
   int buttonState = digitalRead(pin_num);
-  if (DEBUG && (buttonState == LOW)) {
-    Serial.print("Button Pressed");
-    Serial.println(pin_num, DEC);
-  }
   return buttonState == LOW;
 }
 
@@ -273,6 +269,14 @@ void setup()
 
 void loop()
 {
+  if (DEBUG) {
+    for (int i = 0; i < num_states; ++i) {
+      if (active_states[i]) {
+        Serial.print(i, DEC);
+      }
+    }
+    Serial.println();
+  }
   loop_delay = 1000;
   //loop_delay = 600000;
   for (int state_int = kStateState; state_int <= kEndState; ++state_int) {
