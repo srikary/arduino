@@ -3,21 +3,12 @@
 #include <Wire.h>
 #include <Adafruit_MLX90614.h>
 #include <Servo.h>
-#include <LCD.h>
 #include <LiquidCrystal_I2C.h>
 
 // BEGIN LCD Config Params
 #define LCD_I2C_ADDR    0x27 // <<----- Add your address here.  Find it from I2C Scanner
-#define BACKLIGHT_PIN     3
-#define En_pin  2
-#define Rw_pin  1
-#define Rs_pin  0
-#define D4_pin  4
-#define D5_pin  5
-#define D6_pin  6
-#define D7_pin  7
-// END LCD Config Params.
-LiquidCrystal_I2C	lcd(LCD_I2C_ADDR,En_pin,Rw_pin,Rs_pin,D4_pin,D5_pin,D6_pin,D7_pin);
+LiquidCrystal_I2C lcd(LCD_I2C_ADDR,16,4);  // set the LCD address to 0x27 for a 20 chars and 4 line display
+
 
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 
@@ -45,7 +36,7 @@ Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 #define DIR_UP -1
 #define DIR_DOWN 1
 
-#define DEBUG true
+#define DEBUG false
 
 Servo strainer_servo;
 
@@ -191,7 +182,9 @@ void turnStoveOff() {
 void runPumpForward() {
   digitalWrite(RELAY1_PIN, LOW); // Runs Pump in forward direction
   digitalWrite(RELAY2_PIN, LOW); 
-  digitalWrite(RELAY3_PIN, LOW); 
+  digitalWrite(RELAY3_PIN, LOW);
+  milk_pump_data.is_on = true;
+  milk_pump_data.is_forward = true; 
   if (DEBUG) {
     Serial.println("Pump F");
   }
@@ -201,6 +194,8 @@ void runPumpBackward() {
   digitalWrite(RELAY1_PIN, HIGH);  // Runs Pump in reverse direction.
   digitalWrite(RELAY2_PIN, HIGH); 
   digitalWrite(RELAY3_PIN, LOW); 
+  milk_pump_data.is_on = true;
+  milk_pump_data.is_forward = false;
   if (DEBUG) {
     Serial.println("Pump R");
   }
@@ -208,6 +203,8 @@ void runPumpBackward() {
 
 void stopPump() {
   digitalWrite(RELAY3_PIN, HIGH);
+  milk_pump_data.is_on = false;
+  milk_pump_data.is_forward = false;
   if (DEBUG) {
     Serial.println("Pump Off"); 
   }
@@ -234,7 +231,6 @@ void Init() {
     active_states[i] = false;
   }
   active_states[REFRESH_LCD] = true;
-  active_states[SLEEP] = true;
 }
 
 void setup()
@@ -259,16 +255,16 @@ void setup()
   strainer_servo.detach();
 
   milk_pump_data.num_cups = 1;
-  setTime(6, 8, 55, DAY, MONTH, YEAR);
+  setTime(6, 9, 51, DAY, MONTH, YEAR);
   sleep_data.wakeup_hour = 6;
   sleep_data.wakeup_minute = 10;
 
   // LCD Initialization
-  lcd.begin (16,2); //  <<----- My LCD was 16x2
-  lcd.setBacklightPin(BACKLIGHT_PIN,POSITIVE);
-  lcd.setBacklight(LOW);
+  lcd.init();                      // initialize the lcd  
+  lcd.noBacklight();
   lcd.home (); // go home
   Init();
+  active_states[SLEEP] = true;
   lcd.clear(); // For some reason, this doesnt seem to work in an ISR.
   //Interrupts
   attachInterrupt(0, timeInterrupt, FALLING); // Connect the set time button to pin 2 on Uno and 3 on leonardo
@@ -298,6 +294,7 @@ void loop()
       if (DEBUG) {
         Serial.println("START_TEA");
       }
+      Init();
       resetMilkPumpData();
       resetStrainerData();
       resetStoveData();
@@ -312,7 +309,7 @@ void loop()
       active_states[CHECK_TEMP] = true;
       active_states[CONTROL_STRAINER] = true;
       lcd.clear();
-      lcd.setBacklight(HIGH); 
+      lcd.backlight(); 
       break;
     case DISPENSE_MILK:
       if (DEBUG) {
@@ -324,8 +321,6 @@ void loop()
       else {
         if (milk_pump_data.next_check_time == ULONG_MAX) { // Start pump
           runPumpForward();
-          milk_pump_data.is_on = true;
-          milk_pump_data.is_forward = true;
           milk_pump_data.forward_start_time = millis();
           unsigned long next_check = millis() 
             + milk_pump_data.forward_prime_duration 
@@ -339,14 +334,12 @@ void loop()
               if (milk_pump_data.is_forward) {
                 stopPump();
                 runPumpBackward();
-                milk_pump_data.is_forward = false;
                 milk_pump_data.forward_done = true;
                 milk_pump_data.reverse_start_time = millis();
                 milk_pump_data.next_check_time = millis() + milk_pump_data.reverse_prime_duration;
               } 
               else {
                 stopPump();
-                milk_pump_data.is_on = false;
                 milk_pump_data.reverse_done = true;
                 time_now = millis();
                 milk_pump_data.pump_end_time = time_now;
@@ -450,6 +443,7 @@ void loop()
       }
       break;
     case CLEAN:
+      Init();
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.print("    Cleaning");
@@ -465,6 +459,7 @@ void loop()
       lcd.clear();
       break;
     case BOIL_EGG:
+      Init();
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.print("Boiling 'A' Egg");
@@ -509,7 +504,7 @@ void loop()
         active_states[SLEEP] = true;
         active_states[REFRESH_LCD] = true;
         lcd.clear();
-        lcd.setBacklight(LOW); 
+        lcd.noBacklight(); 
         strainer_servo.detach();
       }
       break;
@@ -625,36 +620,28 @@ bool shouldIWakeUp() {
 void stateInterrupt() {
   if ((millis() - state_lastDebounceTime) > debounceDelay) {
     state_lastDebounceTime = millis();
-    if (DEBUG) {
-      Serial.println("State Interrupt");
-    }
     if (isButtonPressed(TEA_NOW_VS_ALARM_MODE_PIN)) {
-      Init();
       active_states[SLEEP] = false;
       active_states[START_TEA] = true;
       loop_delay = 1000;
-    } 
+    }
     else if (isButtonPressed(CLEANER_HOUR_MODE_PIN)) {
-      Init();
       active_states[SLEEP] = false;
       active_states[CLEAN] = true;
       loop_delay = 1000;
-    } 
+    }  
     else if (isButtonPressed(EGG_MODE_MINUTE_PIN)) {
       Init();
       active_states[SLEEP] = false;
       active_states[BOIL_EGG] = true;
       loop_delay = 1000;
     }
-  }
+  } 
 }
 
 void timeInterrupt() {
   if ((millis() - time_lastDebounceTime) > debounceDelay) {
     time_lastDebounceTime = millis();
-    if (DEBUG) {
-      Serial.println("Time Interrupt");
-    }
     if (isButtonPressed(TEA_NOW_VS_ALARM_MODE_PIN)) {
       if (milk_pump_data.num_cups == 1) {
         milk_pump_data.num_cups = 2;
@@ -663,7 +650,6 @@ void timeInterrupt() {
         milk_pump_data.num_cups = 1;
       }
     }
-
     if (isButtonPressed(SET_ALARM_PIN)) {
       setAlarm();
       loop_delay = 1000;
@@ -746,6 +732,3 @@ float getTemp(){
   float TemperatureSum = tempRead / 16;
   return TemperatureSum;
 }
-
-
-
