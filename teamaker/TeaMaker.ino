@@ -77,7 +77,7 @@ volatile SleepData sleep_data;
 struct StrainerData {
   static const int high_pos = 0;
   static const int low_pos = 180;
-  static const int mid_pos = 100;
+  static const int mid_pos = 50;
   static const unsigned long steep_duration_before_stirring = 60000;
   static const unsigned long steep_duration = 180000;
   static const unsigned long move_delay = 10;
@@ -494,7 +494,7 @@ void loop()
       }
       strainer_data.sign = DIR_UP;
       while (strainer_data.current_pos > strainer_data.high_pos) {
-        strainer_data.current_pos += (strainer_data.dx * strainer_data.sign) ;
+        strainer_data.current_pos += (strainer_data.dx * -1) ;
         strainer_servo.write(strainer_data.current_pos);
         delay(strainer_data.move_delay);
       }
