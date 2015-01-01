@@ -425,8 +425,7 @@ void loop()
               stove_data.boiling_point_reached = true;
             }
           }
-        } 
-        else {
+        } else {
           turnStoveOff();
           stove_data.stop_millis = millis();
           active_states[CHECK_TEMP] = false;
@@ -494,13 +493,18 @@ void loop()
       }
       strainer_data.sign = DIR_UP;
       while (strainer_data.current_pos > strainer_data.high_pos) {
-        strainer_data.current_pos += (strainer_data.dx * -1) ;
+        strainer_data.current_pos += (strainer_data.dx * DIR_UP);
         strainer_servo.write(strainer_data.current_pos);
         delay(strainer_data.move_delay);
       }
-
+      strainer_servo.write(strainer_data.high_pos);  // Just to make sure.
+      strainer_servo.detach();
+      
       // If stove is Off, go back to sleep. One does not rest until the stove is Off.
-      if (!stove_data.is_on) {
+      if (stove_data.is_on) {
+        turnStoveOff();
+        stove_data.stop_millis = millis();
+        active_states[CHECK_TEMP] = false;
         // Deactivate all states except DONE
         for (int i = 0; i < num_states; ++i) {
           active_states[i] = false;
@@ -508,8 +512,7 @@ void loop()
         active_states[SLEEP] = true;
         active_states[REFRESH_LCD] = true;
         lcd.clear();
-        lcd.noBacklight(); 
-        strainer_servo.detach();
+        lcd.noBacklight();
       }
       break;
     }
