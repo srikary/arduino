@@ -7,6 +7,7 @@
 
 // BEGIN LCD Config Params
 #define LCD_I2C_ADDR    0x27 // <<----- Add your address here.  Find it from I2C Scanner
+// Use the LiquidCrystal library by DWRobot
 LiquidCrystal_I2C lcd(LCD_I2C_ADDR,16,2);  // set the LCD address to 0x27 for a 20 chars and 4 line display
 
 
@@ -28,7 +29,7 @@ Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 
 #define DAY 1
 #define MONTH 1
-#define YEAR 2014
+#define YEAR 2015
 #define INTERRUPT_BUTTON_DELAY 16000
 
 #define ULONG_MAX ((1 << 31) - 1)
@@ -78,8 +79,8 @@ struct StrainerData {
   static const int high_pos = 0;
   static const int low_pos = 180;
   static const int mid_pos = 50;
-  static const unsigned long steep_duration_before_stirring = 60000;
-  static const unsigned long steep_duration = 180000;
+  static const unsigned long steep_duration_before_stirring = 180000; // 60 seconds
+  static const unsigned long steep_duration = 360000; // 6 minutes
   static const unsigned long move_delay = 10;
   static const int dx = 1;
   int current_pos;
@@ -117,9 +118,9 @@ void resetStoveData() {
 }
 
 struct MilkPumpData {
-  static const unsigned long duration_per_cup = 1000; // TODO 600000;
-  static const unsigned long forward_prime_duration = 1000; // 50000;
-  static const unsigned long reverse_prime_duration = 1000; // 40000;
+  static const unsigned long duration_per_cup = 600000; // TODO 600000;
+  static const unsigned long forward_prime_duration = 50000; // 50000;
+  static const unsigned long reverse_prime_duration = 40000; // 40000;
   volatile int num_cups;
   bool is_on;
   bool is_forward;
@@ -251,9 +252,9 @@ void setup()
   strainer_servo.detach();
 
   milk_pump_data.num_cups = 1;
-  setTime(6, 9, 51, DAY, MONTH, YEAR);
-  sleep_data.wakeup_hour = 6;
-  sleep_data.wakeup_minute = 10;
+  setTime(21, 50, 50, DAY, MONTH, YEAR);
+  sleep_data.wakeup_hour = 5;
+  sleep_data.wakeup_minute = 55;
 
   // LCD Initialization
   lcd.init();                      // initialize the lcd  
