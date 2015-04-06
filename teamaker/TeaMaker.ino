@@ -7,7 +7,6 @@
 
 // BEGIN LCD Config Params
 #define LCD_I2C_ADDR    0x27 // <<----- Add your address here.  Find it from I2C Scanner
-// Use the LiquidCrystal library by DWRobot
 LiquidCrystal_I2C lcd(LCD_I2C_ADDR,16,2);  // set the LCD address to 0x27 for a 20 chars and 4 line display
 
 
@@ -79,7 +78,7 @@ struct StrainerData {
   static const int high_pos = 0;
   static const int low_pos = 180;
   static const int mid_pos = 50;
-  static const unsigned long steep_duration_before_stirring = 180000; // 60 seconds
+  static const unsigned long steep_duration_before_stirring = 180000; // 3 minutes
   static const unsigned long steep_duration = 360000; // 6 minutes
   static const unsigned long move_delay = 10;
   static const int dx = 1;
@@ -118,9 +117,9 @@ void resetStoveData() {
 }
 
 struct MilkPumpData {
-  static const unsigned long duration_per_cup = 600000; // TODO 600000;
-  static const unsigned long forward_prime_duration = 50000; // 50000;
-  static const unsigned long reverse_prime_duration = 40000; // 40000;
+  static const unsigned long duration_per_cup = 450000; // 7.5 minutes;
+  static const unsigned long forward_prime_duration = 30000; // 30 seconds;
+  static const unsigned long reverse_prime_duration = 30000; // 30 seconds;
   volatile int num_cups;
   bool is_on;
   bool is_forward;
