@@ -4,14 +4,14 @@
 #include <Servo.h>
 
 #define SERVO_PIN 5
-#define OPEN_POS 80
+#define OPEN_POS 160
 #define CLOSE_POS 0
 #define KEEP_OPEN_MSEC 5000
 Servo myservo;
 volatile int d4_val; // storage for data states
 volatile bool dirty = false; // interrupt has occurred flag
 int pos = 0;
-int move_delay = 2;
+int move_delay = 7;
 
 // Interrupt Service Routine attached to INT0 vector
 void pinInt0ISR()
@@ -25,10 +25,11 @@ void pinInt0ISR()
 
 void setup() {
   Serial.begin(9600);
-  attachInterrupt(0, pinInt0ISR, RISING);
   myservo.attach(SERVO_PIN);
   pos = CLOSE_POS;
   myservo.write(pos);
+  myservo.detach();
+  attachInterrupt(0, pinInt0ISR, RISING);
 }
 
 void openLatch() {
@@ -48,13 +49,13 @@ void closeLatch() {
 }
 
 void loop() {
-
-
   if (dirty)
   {
     dirty = false;              // clear interrupt occurance flag
+    myservo.attach(SERVO_PIN);
     openLatch();
     delay(KEEP_OPEN_MSEC);
     closeLatch();
+    myservo.detach();
   }
 }
