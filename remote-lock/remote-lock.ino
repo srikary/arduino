@@ -7,11 +7,13 @@
 #define OPEN_POS 160
 #define CLOSE_POS 0
 #define KEEP_OPEN_MSEC 5000
+#define MOVE_DELAY  7
+
 Servo myservo;
 volatile int d4_val; // storage for data states
 volatile bool dirty = false; // interrupt has occurred flag
 int pos = 0;
-int move_delay = 7;
+
 
 // Interrupt Service Routine attached to INT0 vector
 void pinInt0ISR()
@@ -20,7 +22,7 @@ void pinInt0ISR()
   // Provide a visual clue of the interrupt
   digitalWrite(13, !digitalRead(13));  // Toggle LED on pin 13
   // Grab the data states
-  dirty = true;                          // flag interrupt occurance
+  dirty = true; // flag interrupt occurance
 }
 
 void setup() {
@@ -36,7 +38,7 @@ void openLatch() {
   while (pos < OPEN_POS) {
     pos ++;
     myservo.write(pos);
-    delay(move_delay);
+    delay(MOVE_DELAY);
   }
 }
 
@@ -44,14 +46,14 @@ void closeLatch() {
   while (pos > CLOSE_POS) {
     pos --;
     myservo.write(pos);
-    delay(move_delay);
+    delay(MOVE_DELAY);
   }
 }
 
 void loop() {
   if (dirty)
   {
-    dirty = false;              // clear interrupt occurance flag
+    dirty = false;  // clear interrupt occurance flag
     myservo.attach(SERVO_PIN);
     openLatch();
     delay(KEEP_OPEN_MSEC);
