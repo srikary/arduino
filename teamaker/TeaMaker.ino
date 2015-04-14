@@ -86,7 +86,7 @@ struct StrainerData {
   static const int low_pos = 160;
   static const int mid_pos = 60;
   static const unsigned long steep_duration_before_stirring = 180000; // 3 minutes
-  static const unsigned long steep_duration = 360000; // 6 minutes
+  static const unsigned long steep_duration = 300000; // 5 minutes
   static const unsigned long move_delay = 10;
   static const int dx = 1;
   int current_pos;
@@ -150,7 +150,7 @@ EggData egg_data;
 struct CleanerData {
   static const unsigned long forward_run_time = 60000;
   static const unsigned long reverse_run_time = 5000;
-  static const int num_cycles = 3;
+  static const int num_cycles = 2;
 };
 CleanerData cleaner_data;
 
@@ -453,13 +453,30 @@ void loop()
         lcd.clear();
         lcd.setCursor(0, 0);
         lcd.print("    Cleaning");
+        // Turn on the stove and lower the strainer.
+        turnStoveOn();
+        while (strainer_data.current_pos < strainer_data.low_pos) {
+          strainer_data.current_pos += (strainer_data.dx * DIR_DOWN);
+          strainer_servo.write(strainer_data.current_pos);
+          delay(strainer_data.move_delay);
+        }
+        // Run pump.
         for (int i = 0 ; i < cleaner_data.num_cycles; ++i) {
           runPumpForward();
           delay(cleaner_data.forward_run_time);
           runPumpBackward();
           delay(cleaner_data.reverse_run_time);
         }
+        delay(milk_pump_data.reverse_prime_duration);
         stopPump();
+
+        // Stop the stove and raise the strainer.
+        turnStoveOff();
+        while (strainer_data.current_pos > strainer_data.high_pos) {
+          strainer_data.current_pos += (strainer_data.dx * DIR_UP);
+          strainer_servo.write(strainer_data.current_pos);
+          delay(strainer_data.move_delay);
+        }
         active_states[CLEAN] = false;
         active_states[SLEEP] = true;
         lcd.clear();
