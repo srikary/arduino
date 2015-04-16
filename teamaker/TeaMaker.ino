@@ -455,11 +455,13 @@ void loop()
         lcd.print("    Cleaning");
         // Turn on the stove and lower the strainer.
         turnStoveOn();
+        strainer_servo.attach(STRAINER_SERVO_PIN);  // attaches the servo on pin 9 to the servo object
         while (strainer_data.current_pos < strainer_data.low_pos) {
           strainer_data.current_pos += (strainer_data.dx * DIR_DOWN);
           strainer_servo.write(strainer_data.current_pos);
           delay(strainer_data.move_delay);
         }
+        strainer_servo.detach();
         // Run pump.
         for (int i = 0 ; i < cleaner_data.num_cycles; ++i) {
           runPumpForward();
@@ -472,11 +474,13 @@ void loop()
 
         // Stop the stove and raise the strainer.
         turnStoveOff();
+        strainer_servo.attach(STRAINER_SERVO_PIN);  // attaches the servo on pin 9 to the servo object
         while (strainer_data.current_pos > strainer_data.high_pos) {
           strainer_data.current_pos += (strainer_data.dx * DIR_UP);
           strainer_servo.write(strainer_data.current_pos);
           delay(strainer_data.move_delay);
         }
+        strainer_servo.detach();
         active_states[CLEAN] = false;
         active_states[SLEEP] = true;
         lcd.clear();
