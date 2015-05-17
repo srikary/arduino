@@ -84,7 +84,7 @@ volatile SleepData sleep_data;
 struct StrainerData {
   static const int high_pos = 0;
   static const int low_pos = 160;
-  static const int mid_pos = 60;
+  static const int mid_pos = 40;
   static const unsigned long steep_duration_before_stirring = 180000; // 3 minutes
   static const unsigned long steep_duration = 300000; // 5 minutes
   static const unsigned long move_delay = 10;
@@ -103,8 +103,8 @@ void resetStrainerData() {
 }
 
 struct StoveData {
-  static const float boiling_point_upper = 73.80f; //100.0f;
-  static const float boiling_point_lower = 67.0f; // 98.0f;
+  static const float boiling_point_upper = 69.0f; // Celcius;
+  static const float boiling_point_lower = 62.0f; // Celcius;
   static const unsigned long max_on_duration = 1800000;  // 30 Minutes
 
   bool is_on;
@@ -124,7 +124,7 @@ void resetStoveData() {
 }
 
 struct MilkPumpData {
-  static const unsigned long duration_per_cup = 450000; // 7.5 minutes;
+  static const unsigned long duration_per_cup = 400000; // 6:40 minutes;
   static const unsigned long forward_prime_duration = 30000; // 30 seconds;
   static const unsigned long reverse_prime_duration = 30000; // 30 seconds;
   volatile int num_cups;
@@ -412,6 +412,13 @@ void loop()
           Serial.println("*C");
           unsigned long stove_on_duration = millis() - stove_data.start_millis;
           if (stove_data.should_keep_on && (stove_on_duration < stove_data.max_on_duration)) {
+            if (stove_data.temperature >= stove_data.boiling_point_lower) {
+              if (!stove_data.boiling_point_reached) {
+                stove_data.boiling_point_reached_millis = millis();
+                stove_data.boiling_point_reached = true;
+              }
+            }
+            
             if (stove_data.temperature >= stove_data.boiling_point_upper) {
               if (stove_data.is_on) {
                 turnStoveOff();
@@ -420,12 +427,6 @@ void loop()
             else if (stove_data.temperature <= stove_data.boiling_point_lower) {
               if (!stove_data.is_on) {
                 turnStoveOn();
-              }
-            }
-            else {
-              if (!stove_data.boiling_point_reached) {
-                stove_data.boiling_point_reached_millis = millis();
-                stove_data.boiling_point_reached = true;
               }
             }
           } else {
