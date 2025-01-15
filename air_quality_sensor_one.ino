@@ -12,58 +12,14 @@
 
 #include <AGS10.h>
 #include <Wire.h>
-
-AGS10 ags10_sensor = AGS10();
-
-DFRobot_DHT11 DHT;
-#define DHT11_PIN A0
-
-
-// For the breakout board, you can use any 2 or 3 pins.
-// These pins will also work for the 1.8" TFT shield.
-#define TFT_CS        10
-#define TFT_RST        8 // Or set to -1 and connect to Arduino RESET pin
-#define TFT_DC         9
-               
-#define         MQ2_PIN                       (A1)     //define which   analog input channel you are going to use
-#define         MQ7_PIN                       (A2)     //define which   analog input channel you are going to use
-#define         RL_VALUE                     (5)      //define the load resistance on the board, in kilo ohms
-#define         RO_CLEAN_AIR_FACTOR           (9.83)  //RO_CLEAR_AIR_FACTOR=(Sensor resistance in clean air)/RO,
-                                                      //which is derived from the   chart in datasheet
- 
-/**********************Software Related Macros***********************************/
-#define         CALIBARAION_SAMPLE_TIMES     (50)    //define how many samples you are   going to take in the calibration phase
-#define         CALIBRATION_SAMPLE_INTERVAL   (500)   //define the time interal(in milisecond) between each samples in the
-                                                      //cablibration phase
-#define         READ_SAMPLE_INTERVAL         (50)    //define how many samples you are   going to take in normal operation
-#define         READ_SAMPLE_TIMES            (5)      //define the time interal(in milisecond) between each samples in 
- 
-/*********************Application Related Macros*********************************/
-#define          GAS_LPG                      (0)
-#define          GAS_CO                       (1)
-#define          GAS_SMOKE                    (2)
- 
-/****************************Globals**********************************************/
-float            LPGCurve[3]  =  {2.3,0.21,-0.47};   //two points are taken from the curve.   
-                                                    //with these two points,   a line is formed which is "approximately equivalent"
-                                                    //to   the original curve. 
-                                                    //data   format:{ x, y, slope}; point1: (lg200, 0.21), point2: (lg10000, -0.59) 
-float            COCurve[3]  =  {2.3,0.72,-0.34};    //two points are taken from the curve.   
-                                                    //with these two points,   a line is formed which is "approximately equivalent" 
-                                                    //to   the original curve.
-                                                    //data   format:{ x, y, slope}; point1: (lg200, 0.72), point2: (lg10000,  0.15) 
-float            SmokeCurve[3] ={2.3,0.53,-0.44};    //two points are taken from the curve.   
-                                                    //with these two points,   a line is formed which is "approximately equivalent" 
-                                                    //to   the original curve.
-                                                    //data   format:{ x, y, slope}; point1: (lg200, 0.53), point2: (lg10000,  -0.22)                                                     
-float            Ro_mq2           =  10;                 //Ro is initialized to 10 kilo ohms
-float            Ro_mq7           =  10;                 //Ro is initialized to 10 kilo ohms
+#include <PMS.h>
 
 // Connections
 // PMS5003 PM2.5 Sensor
-// https://how2electronics.com/interfacing-pms5003-air-quality-sensor-arduino/#google_vignette
+// https://github.com/fu-hsi/PMS/blob/master/src/PMS.cpp
 // https://www.aliexpress.com/item/1005005967735332.html
-// VCC -> 5v, GND -> GND, TX (Grey) -> 2, RX (Yellow) -> Unconnected (needs voltage divider 3.3v)
+// https://cdn-shop.adafruit.com/product-files/3686/plantower-pms5003-manual_v2-3.pdf
+// VCC -> 5v, GND -> GND, TX (Grey) -> 2, RX (Yellow) -> 3 (needs voltage divider 3.3v)
 
 // MHZ19B CO2 Sensor
 // https://www.aliexpress.com/item/1005006394895362.html
@@ -85,9 +41,39 @@ float            Ro_mq7           =  10;                 //Ro is initialized to 
 // VCC -> 5v, GND, SDA, SCL
 
 // DHT11 - Temp Humidity
+// https://github.com/DFRobot/DFRobot_DHT11
 // + -> 5v, - -> GND, out -> A0
 
-unsigned long getDataTimer = 0;
+// MQ Sensors
+// https://github.com/miguel5612/MQSensorsLib
+
+
+AGS10 ags10_sensor = AGS10();
+
+DFRobot_DHT11 DHT;
+#define DHT11_PIN A0
+
+// For the breakout board, you can use any 2 or 3 pins.
+// These pins will also work for the 1.8" TFT shield.
+#define TFT_CS        10
+#define TFT_RST        8 // Or set to -1 and connect to Arduino RESET pin
+#define TFT_DC         9
+
+//Include the library
+#include <MQUnifiedsensor.h>
+#define         MQ2_PIN                 (A1)
+#define         MQ7_PIN                 (A2)
+#define         Voltage_Resolution      (5)
+#define         ADC_Bit_Resolution      (10) // For arduino UNO/MEGA/NANO
+#define         RatioMQ2CleanAir        (9.83) //RS / R0 = 9.83 ppm 
+#define RatioMQ7CleanAir 27.5 //RS / R0 = 27.5 ppm 
+
+// MQUnifiedsensor MQ2("Arduino Nano", Voltage_Resolution, ADC_Bit_Resolution, MQ2_PIN, "MQ-2");
+// MQUnifiedsensor MQ7("Arduino Nano", Voltage_Resolution, ADC_Bit_Resolution, MQ7_PIN, "MQ-7");
+
+unsigned long oldTime = 0;
+
+unsigned long mhz19b_co2_data_timer = 0;
 
 SoftwareSerial pms5003_serial(2, 3); // RX, TX
 SoftwareSerial mhz19_serial(4, 5);
@@ -95,78 +81,113 @@ SoftwareSerial ze08_serial(6,7);
 WZ wz_ze08_sensor(ze08_serial);
 MHZ19 mhz19b;
 
-struct pms5003data {
-  uint16_t framelen;
-  uint16_t pm10_standard, pm25_standard, pm100_standard;
-  uint16_t pm10_env, pm25_env, pm100_env;
-  uint16_t particles_03um, particles_05um, particles_10um, particles_25um, particles_50um, particles_100um;
-  uint16_t unused;
-  uint16_t checksum;
-};
-  
-struct pms5003data data;
+
+PMS pms_5003_sensor(pms5003_serial);
+PMS::DATA pms_5003_data;
+
 WZ::DATA hcho_data;
-
-// SensirionI2CSgp41 sgp41;
-
-// VOCGasIndexAlgorithm voc_algorithm;
-// NOxGasIndexAlgorithm nox_algorithm;
-
-// // time in seconds needed for NOx conditioning
-// uint16_t conditioning_s = 10;
 
 Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
 
 void setup() {
-
   Serial.begin(9600);
-  
   pms5003_serial.begin(9600);
+  pms_5003_sensor.passiveMode();    // Switch to passive mode
+  Serial.println("Waking up, wait 30 seconds for stable readings");
+  pms_5003_sensor.wakeUp();
   mhz19_serial.begin(9600);                               // (Uno example) device to MH-Z19 serial start   
   mhz19b.begin(mhz19_serial);                                // *Serial(Stream) refence must be passed to library begin(). 
   mhz19b.autoCalibration(true); 
   ze08_serial.begin(9600);
   // wz.passiveMode();
   wz_ze08_sensor.activeMode();
-
   ags10_sensor.begin();
+  
 
-  Ro_mq2 = MQCalibration(MQ2_PIN);
-  Ro_mq7 = MQCalibration(MQ7_PIN);
+  // MQ2.setRegressionMethod(1); //_PPM =  a*ratio^b
+  // MQ2.setA(574.25); MQ2.setB(-2.222); // Configure the equation to to calculate LPG concentration
+  // /*
+  //   Exponential regression:
+  //   Gas    | a      | b
+  //   H2     | 987.99 | -2.162
+  //   LPG    | 574.25 | -2.222
+  //   CO     | 36974  | -3.109
+  //   Alcohol| 3616.1 | -2.675
+  //   Propane| 658.71 | -2.168
+  // */
+
+  // /*****************************  MQ Init ********************************************/ 
+  // //Remarks: Configure the pin of arduino as input.
+  // /************************************************************************************/ 
+  // MQ2.init(); 
+  // Serial.print("Calibrating MQ2 please wait. Only execute this in Clean Air Conditions");
+  // float calcR0 = 0;
+  // for(int i = 1; i<=10; i ++)
+  // {
+  //   MQ2.update(); // Update data, the arduino will read the voltage from the analog pin
+  //   calcR0 += MQ2.calibrate(RatioMQ2CleanAir);
+  // }
+  // MQ2.setR0(calcR0/10);
+  // Serial.println("Done Calibrating MQ2");
+  
+  // if(isinf(calcR0)) {Serial.println("Warning: Conection issue, R0 is infinite (Open circuit detected) please check your wiring and supply"); while(1);}
+  // if(calcR0 == 0){Serial.println("Warning: Conection issue found, R0 is zero (Analog pin shorts to ground) please check your wiring and supply"); while(1);}
+  /*****************************  MQ CAlibration ********************************************/ 
+
+  // MQ7.setRegressionMethod(1); //_PPM =  a*ratio^b
+  // MQ7.setA(99.042); MQ7.setB(-1.518); // Configure the equation to calculate CO concentration value
+
+  // /*
+  //   Exponential regression:
+  // GAS     | a      | b
+  // H2      | 69.014  | -1.374
+  // LPG     | 700000000 | -7.703
+  // CH4     | 60000000000000 | -10.54
+  // CO      | 99.042 | -1.518
+  // Alcohol | 40000000000000000 | -12.35
+  // */
+  
+  // MQ7.init(); 
+
+  // Serial.print("Calibrating MQ7. Please wait");
+  // calcR0 = 0;
+  // for(int i = 1; i<=10; i ++)
+  // {
+  //   MQ7.update(); // Update data, the arduino will read the voltage from the analog pin
+  //   calcR0 += MQ7.calibrate(RatioMQ7CleanAir);
+  // }
+  // MQ7.setR0(calcR0/10);
+  // Serial.println("Done Calibrating MQ7");
+  
+  // if(isinf(calcR0)) {Serial.println("Warning: Conection issue, R0 is infinite (Open circuit detected) please check your wiring and supply"); while(1);}
+  // if(calcR0 == 0){Serial.println("Warning: Conection issue found, R0 is zero (Analog pin shorts to ground) please check your wiring and supply"); while(1);}
+
+
   tft.init(240, 320);   
 }
  
-
-    
+     
 void loop() {
+  Serial.println("Starting loop");
   pms5003_serial.listen();
-  if (readPMSdata(&pms5003_serial)) {
+  pms_5003_sensor.requestRead();
+  if (pms_5003_sensor.readUntil(pms_5003_data, 10000)) {
     // reading data was successful!
-    Serial.println();
-    Serial.println("---------------------------------------");
-    Serial.println("Concentration Units (standard)");
-    Serial.print("PM 1.0: "); Serial.print(data.pm10_standard);
-    Serial.print("\t\tPM 2.5: "); Serial.print(data.pm25_standard);
-    Serial.print("\t\tPM 10: "); Serial.println(data.pm100_standard);
-    Serial.println("---------------------------------------");
-    Serial.println("Concentration Units (environmental)");
-    Serial.print("PM 1.0: "); Serial.print(data.pm10_env);
-    Serial.print("\t\tPM 2.5: "); Serial.print(data.pm25_env);
-    Serial.print("\t\tPM 10: "); Serial.println(data.pm100_env);
-    Serial.println("---------------------------------------");
-    Serial.print("Particles > 0.3um / 0.1L air:"); Serial.println(data.particles_03um);
-    Serial.print("Particles > 0.5um / 0.1L air:"); Serial.println(data.particles_05um);
-    Serial.print("Particles > 1.0um / 0.1L air:"); Serial.println(data.particles_10um);
-    Serial.print("Particles > 2.5um / 0.1L air:"); Serial.println(data.particles_25um);
-    Serial.print("Particles > 5.0um / 0.1L air:"); Serial.println(data.particles_50um);
-    Serial.print("Particles > 10.0 um / 0.1L air:"); Serial.println(data.particles_100um);
+    Serial.print("PM 1.0 (ug/m3): ");
+    Serial.println(pms_5003_data.PM_AE_UG_1_0);
+
+    Serial.print("PM 2.5 (ug/m3): ");
+    Serial.println(pms_5003_data.PM_AE_UG_2_5);
+
+    Serial.print("PM 10.0 (ug/m3): ");
+    Serial.println(pms_5003_data.PM_AE_UG_10_0);
     Serial.println("---------------------------------------");
   }
 
   mhz19_serial.listen();
   int CO2; 
   int8_t Temp;
-  if (millis() - getDataTimer >= 2000) {
+  if (millis() - mhz19b_co2_data_timer >= 2000) {
       /* note: getCO2() default is command "CO2 Unlimited". This returns the correct CO2 reading even 
       if below background CO2 levels or above range (useful to validate sensor). You can use the 
       usual documented command with getCO2(false) */
@@ -181,7 +202,7 @@ void loop() {
       Serial.print("Temperature [from MHZ19B] (C): ");                  
       Serial.println(Temp);                               
 
-      getDataTimer = millis();
+      mhz19b_co2_data_timer = millis();
   }
     
   ze08_serial.listen();
@@ -216,15 +237,18 @@ void loop() {
   Serial.print(ags10_sensor.readTVOC());
   Serial.println(" ppm");
 
-  int lpg_percentage = MQGetGasPercentage(MQRead(MQ2_PIN)/Ro_mq2, GAS_LPG);
-  Serial.print("LPG: ");
-  Serial.print(lpg_percentage);
-  Serial.println("ppm"); 
+
+  // MQ2.update(); // Update data, the arduino will read the voltage from the analog pin
+  // int lpg_percentage = MQ2.readSensor();
+  // Serial.print("LPG: ");
+  // Serial.print(lpg_percentage);
+  // Serial.println("ppm"); 
   
-  int co_percentage = MQGetGasPercentage(MQRead(MQ7_PIN)/Ro_mq7, GAS_CO);
-  Serial.print("CO: ");
-  Serial.print(co_percentage);
-  Serial.println("ppm");
+  // MQ7.update(); // Update data, the arduino will read the voltage from the analog pin 
+  // int co_percentage = MQ7.readSensor();
+  // Serial.print("CO: ");
+  // Serial.print(co_percentage);
+  // Serial.println("ppm");
   
 
   Serial.println("Printing to TFT");
@@ -241,181 +265,33 @@ void loop() {
   // tft.setTextColor(ST77XX_MAGENTA);
   tft.setTextSize(3);
 
-  tft.print("PM 1.0 : ");
-  tft.println(data.pm10_standard);
-  tft.print("PM 2.5 : ");
-  tft.println(data.pm25_standard);
-  tft.print("PM  10 : ");
-  tft.println(data.pm100_standard);
-  tft.print("CO2    : ");
+  tft.print("PM 1.0: ");
+  tft.println(pms_5003_data.PM_AE_UG_1_0);
+  tft.print("PM 2.5: ");
+  tft.println(pms_5003_data.PM_AE_UG_2_5);
+  tft.print("PM  10: ");
+  tft.println(pms_5003_data.PM_AE_UG_10_0);
+  tft.print("CO2   : ");
   tft.println(CO2);
-  tft.print("Temp   : ");
+  tft.print("Temp  : ");
   tft.print(DHT.temperature);
   tft.println(" C");
-  tft.print("Hum    : "); 
+  tft.print("Hum   : "); 
   tft.print(DHT.humidity);
   tft.println(" %");
-  tft.print("TVOC   :");
+  tft.print("TVOC  :");
   tft.print(ags10_sensor.readTVOC());
-  tft.println(" ppd");
-  tft.print("HCHO   : ");
+  tft.println("ppd");
+  tft.print("HCHO  :");
   tft.print(hcho_data.HCHO_PPB);
-  tft.println(" ppd");
-  tft.print("HCHO   : ");
+  tft.println("ppd");
+  tft.print("HCHO  :");
   tft.print(hcho_data.HCHO_UGM3);
-  tft.println(" g/m3");
+  tft.println("g/m3");
   
-  tft.print("LPG    : ");
-  tft.println(lpg_percentage);
-  tft.print("CO     : ");
-  tft.println(co_percentage);
+  // tft.print("LPG   : ");
+  // tft.println(lpg_percentage);
+  // tft.print("CO     : ");
+  // tft.println(co_percentage);
   delay(1000);
 }
- 
-boolean readPMSdata(Stream *s) {
-  while (! s->available()) {
-    delay(100);
-    // return false;
-  }
-  
-  // Read a byte at a time until we get to the special '0x42' start-byte
-  if (s->peek() != 0x42) {
-    s->read();
-    return false;
-  }
-  // while (s->peek() != 0x42) {
-  //   s->read();
-  // }
- 
-  // Now read all 32 bytes
-  if (s->available() < 32) {
-    return false;
-  }
-    
-  uint8_t buffer[32];    
-  uint16_t sum = 0;
-  s->readBytes(buffer, 32);
- 
-  // get checksum ready
-  for (uint8_t i=0; i<30; i++) {
-    sum += buffer[i];
-  }
- 
-  /* debugging
-  for (uint8_t i=2; i<32; i++) {
-    Serial.print("0x"); Serial.print(buffer[i], HEX); Serial.print(", ");
-  }
-  Serial.println();
-  */
-  
-  // The data comes in endian'd, this solves it so it works on all platforms
-  uint16_t buffer_u16[15];
-  for (uint8_t i=0; i<15; i++) {
-    buffer_u16[i] = buffer[2 + i*2 + 1];
-    buffer_u16[i] += (buffer[2 + i*2] << 8);
-  }
- 
-  // put it into a nice struct :)
-  memcpy((void *)&data, (void *)buffer_u16, 30);
- 
-  if (sum != data.checksum) {
-    Serial.println("Checksum failure");
-    return false;
-  }
-  // success!
-  return true;
-}
- 
-/****************   MQResistanceCalculation **************************************
-Input:   raw_adc   - raw value read from adc, which represents the voltage
-Output:  the calculated   sensor resistance
-Remarks: The sensor and the load resistor forms a voltage divider.   Given the voltage
-         across the load resistor and its resistance, the resistance   of the sensor
-         could be derived.
-**********************************************************************************/   
-float MQResistanceCalculation(int raw_adc)
-{
-  return ( ((float)RL_VALUE*(1023-raw_adc)/raw_adc));
-}
-   
-/*************************** MQCalibration **************************************
-Input:    mq_pin - analog channel
-Output:  Ro of the sensor
-Remarks: This function   assumes that the sensor is in clean air. It use  
-         MQResistanceCalculation   to calculates the sensor resistance in clean air 
-         and then divides it   with RO_CLEAN_AIR_FACTOR. RO_CLEAN_AIR_FACTOR is about 
-         10, which differs   slightly between different sensors.
-**********************************************************************************/   
-float MQCalibration(int mq_pin)
-{
-  int i;
-  float val=0;
- 
-   for (i=0;i<CALIBARAION_SAMPLE_TIMES;i++) {            //take multiple samples
-     val += MQResistanceCalculation(analogRead(mq_pin));
-    delay(CALIBRATION_SAMPLE_INTERVAL);
-   }
-  val = val/CALIBARAION_SAMPLE_TIMES;                   //calculate the average   value
- 
-  val = val/RO_CLEAN_AIR_FACTOR;                        //divided   by RO_CLEAN_AIR_FACTOR yields the Ro 
-                                                        //according   to the chart in the datasheet 
- 
-  return val; 
-}
-/***************************   MQRead *******************************************
-Input:   mq_pin - analog   channel
-Output:  Rs of the sensor
-Remarks: This function use MQResistanceCalculation   to caculate the sensor resistenc (Rs).
-         The Rs changes as the sensor   is in the different consentration of the target
-         gas. The sample times   and the time interval between samples could be configured
-         by changing   the definition of the macros.
-**********************************************************************************/   
-float MQRead(int mq_pin)
-{
-  int i;
-  float rs=0;
- 
-  for (i=0;i<READ_SAMPLE_TIMES;i++)   {
-    rs += MQResistanceCalculation(analogRead(mq_pin));
-    delay(READ_SAMPLE_INTERVAL);
-   }
- 
-  rs = rs/READ_SAMPLE_TIMES;
- 
-  return rs;  
-}
- 
-/***************************   MQGetGasPercentage ********************************
-Input:   rs_ro_ratio -   Rs divided by Ro
-         gas_id      - target gas type
-Output:  ppm of the   target gas
-Remarks: This function passes different curves to the MQGetPercentage   function which 
-         calculates the ppm (parts per million) of the target   gas.
-**********************************************************************************/   
-int MQGetGasPercentage(float rs_ro_ratio, int gas_id)
-{
-  if ( gas_id   == GAS_LPG ) {
-     return MQGetPercentage(rs_ro_ratio,LPGCurve);
-  } else   if ( gas_id == GAS_CO ) {
-     return MQGetPercentage(rs_ro_ratio,COCurve);
-   } else if ( gas_id == GAS_SMOKE ) {
-     return MQGetPercentage(rs_ro_ratio,SmokeCurve);
-   }    
- 
-  return 0;
-}
- 
-/***************************  MQGetPercentage   ********************************
-Input:   rs_ro_ratio - Rs divided by Ro
-          pcurve      - pointer to the curve of the target gas
-Output:  ppm of   the target gas
-Remarks: By using the slope and a point of the line. The x(logarithmic   value of ppm) 
-         of the line could be derived if y(rs_ro_ratio) is provided.   As it is a 
-         logarithmic coordinate, power of 10 is used to convert the   result to non-logarithmic 
-         value.
-**********************************************************************************/   
-int  MQGetPercentage(float rs_ro_ratio, float *pcurve)
-{
-  return (pow(10,(((log(rs_ro_ratio)-pcurve[1])/pcurve[2]) + pcurve[0])));
-}
-
