@@ -17,6 +17,22 @@
 #include <Adafruit_ST7789.h> // Hardware-specific library for ST7789
 #include <SPI.h>
 
+// Sensiron SGP41 - TVOC
+// https://sensirion.com/products/catalog/SGP41
+// https://github.com/Sensirion/arduino-gas-index-algorithm/blob/master/src/SensirionGasIndexAlgorithm.h
+// https://github.com/Sensirion/arduino-i2c-sgp41/tree/master/src
+// // VCC (Yellow) -> 5v, GND (Orange) -> GND, SDA (Brown) -> A4, SCL (Red) -> A5
+
+// MQ Sensors
+// https://github.com/miguel5612/MQSensorsLib
+
+// BME280 Adafruit Temperature, Humidity, Pressure sensor
+// https://github.com/adafruit/Adafruit_BME280_Library/blob/master/Adafruit_BME280.cpp
+
+
+// SDS011 PM2.5 Sensor
+// https://github.com/ricki-z/SDS011/tree/master/examples/SDS011_example
+
 #define Voltage_Resolution 5
 #define MQ135_PIN A1
 #define MQ9_PIN (A2)
@@ -52,19 +68,21 @@ Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 
 void setup() {
   Serial.begin(9600);
+  Serial.println(F("Starting"));
   while (!Serial) {
     delay(100);
   }
-
+  
   Wire.begin();
 
   tft.initR(INITR_BLACKTAB); 
-  tft.setRotation(3); 
+  tft.setRotation(0); 
   tft.invertDisplay(false);
   tft.setTextWrap(false);
-  tft.setTextSize(1);
+  tft.setTextSize(2);
   tft.fillScreen(ST77XX_BLACK);
 
+  Serial.println(F("Starting - SGP-41"));
   sgp41_voc_nox_sensor.begin(Wire);
 
   // // delay(10000);  // needed on to ensure that the display is On before the code starts.
@@ -109,16 +127,9 @@ void setup() {
   // Serial.println(F(""));
 
   unsigned status;
-    
-  // default settings
   status = bme_temp_sensor.begin(0x76);  
   if (!status) {
-      Serial.println(F("Could not find a valid BME280 sensor, check wiring, address, sensor ID!"));
-      Serial.print(F("SensorID was: 0x")); Serial.println(bme_temp_sensor.sensorID(),16);
-      Serial.print(F("        ID of 0xFF probably means a bad address, a BMP 180 or BMP 085\n"));
-      Serial.print(F("   ID of 0x56-0x58 represents a BMP 280,\n"));
-      Serial.print(F("        ID of 0x60 represents a BME 280.\n"));
-      Serial.print(F("        ID of 0x61 represents a BME 680.\n"));
+      Serial.println(F("Error Init BME280"));
       while (1) delay(10);
   }
 
@@ -138,7 +149,7 @@ void setup() {
   */
   
   MQ135.init(); 
-  Serial.println(F("Calibrating MQ135 please wait"));
+  Serial.println("Calibrating MQ135 please wait");
   float calcR0 = 0;
   for(int i = 1; i<=10; i ++)
   {
@@ -147,8 +158,8 @@ void setup() {
   }
   MQ135.setR0(calcR0/10);
   Serial.println(F("Done Calibrating MQ135"));
-  if(isinf(calcR0)) {Serial.println(F("Warning: Conection issue, R0 is infinite (Open circuit detected) please check your wiring and supply")); while(1);}
-  if(calcR0 == 0){Serial.println(F("Warning: Conection issue found, R0 is zero (Analog pin shorts to ground) please check your wiring and supply")); while(1);}
+  if(isinf(calcR0)) {Serial.println("Warning: Conection issue"); while(1);}
+  if(calcR0 == 0){Serial.println("Warning: Conection issue found"); while(1);}
   
   MQ9.setRegressionMethod(1); //_PPM =  a*ratio^b
   MQ9.setA(1000.5); MQ9.setB(-2.186); // Configure the equation to to calculate LPG concentration
@@ -160,7 +171,7 @@ void setup() {
     CO      | 599.65 | -2.244
   */
   MQ9.init(); 
-  Serial.println(F("Calibrating MQ9 please wait"));
+  Serial.println("Calibrating MQ9 please wait");
   // delay(90000);  // TODO: Maybe uncomment this for the heater to work.
   calcR0 = 0;
   for(int i = 1; i<=10; i ++)
@@ -169,15 +180,12 @@ void setup() {
     calcR0 += MQ9.calibrate(RatioMQ9CleanAir);
   }
   MQ9.setR0(calcR0/10);
-  Serial.println(F("Done Calibrating MQ9"));
-  if(isinf(calcR0)) {Serial.println(F("Warning: Conection issue, R0 is infinite (Open circuit detected) please check your wiring and supply")); while(1);}
-  if(calcR0 == 0){Serial.println(F("Warning: Conection issue found, R0 is zero (Analog pin shorts to ground) please check your wiring and supply")); while(1);}
-   
-  
+  Serial.println("Done Calibrating MQ9");
+  if(isinf(calcR0)) {Serial.println("Warning: Conection issue"); while(1);}
+  if(calcR0 == 0){Serial.println("Warning: Conection issue found"); while(1);}
 }
 
 void loop() {
-  Serial.println(F("Starting loop"));
   float humidity = bme_temp_sensor.readHumidity();     // %RH
   float temperature = bme_temp_sensor.readTemperature();  // degreeC
   Serial.print(F("Temperature = "));
@@ -267,52 +275,61 @@ void loop() {
   Serial.println(lpg_index);
 
   MQ135.update(); // Update data, the arduino will read the voltage from the analog pin
-  float smoke_index = MQ135.readSensor(); // Sensor will read PPM concentration using the model, a and b values set previously or from the setup
-  Serial.print(F("Smoke: "));
-  Serial.println(smoke_index);
+  float tox_index = MQ135.readSensor(); // Sensor will read PPM concentration using the model, a and b values set previously or from the setup
+  Serial.print(F("Toxic: "));
+  Serial.println(tox_index);
 
   tft.setCursor(0, 0);
-  
   setTextColorForParameter(temperature, 40);
-  tft.print(F(" "));
-  tft.print(temperature);
-  tft.print(F("C |"));
-
-  tft.print(F(" ")); 
-  tft.print(humidity);
-  tft.println(F("% "));
-
-  tft.print(" Press: ");
-  tft.println(bme_temp_sensor.readPressure() / 100.0F);
-  tft.print("Alt: ");
-  tft.println(bme_temp_sensor.readAltitude(SEALEVELPRESSURE_HPA));
+  tft.print(temperature,  1);
+  tft.print(F("C  ")); 
+  tft.print(humidity, 0);
+  tft.println(F("%  "));
 
   setTextColorForAQI(AQI);
-  tft.print(F(" AQI US : "));
+  tft.print("AQI :  ");
   tft.print(AQI);
-  tft.println(F("            "));
+  tft.println(F("    "));
+
+  tft.setTextColor(ST77XX_WHITE, ST77XX_BLACK);
+  tft.print("Alt :");
+  tft.print(bme_temp_sensor.readAltitude(SEALEVELPRESSURE_HPA), 0);
+  tft.println("m     ");
+
+  tft.print("Pres:");
+  tft.print(bme_temp_sensor.readPressure() / 100.0F, 1);
+  tft.println("  ");
+  
 
   setTextColorForParameter(pm25, 40);
-  tft.print(F(" PM 2.5 : "));
+  tft.print("PM25:");
   tft.print(pm25);
-  tft.println(F(" ug/m3       "));
+  tft.println("   ");
 
   setTextColorForParameter(pm10, 200);
-  tft.print(F(" PM  10 : "));
+  tft.print("PM10:");
   tft.print(pm10);
-  tft.println(F(" ug/m3       "));
+  tft.println("   ");
 
-  setTextColorForParameter(srawVoc, 2);
-  tft.print(F(" VOC : "));
+  setTextColorForParameter(srawVoc, 40000);
+  tft.print("VOC :");
   tft.print(srawVoc);
-  tft.print(F(" NOx : "));
-  tft.println(srawNox);
+  tft.println("   ");
 
-  setTextColorForParameter(lpg_index, 7);
-  tft.print(F(" LPG : "));
+  setTextColorForParameter(srawNox, 20000);
+  tft.print("NOx :");
+  tft.print(srawNox);
+  tft.println("   ");
+
+  setTextColorForParameter(lpg_index, 50);
+  tft.print("LPG :");
   tft.print(lpg_index);
-  tft.print(F(" Smoke : "));
-  tft.println(smoke_index);
+  tft.println("   ");
+
+  setTextColorForParameter(tox_index, 20);
+  tft.print("Tox :");
+  tft.print(tox_index);
+  tft.println("     ");
 
 	delay(1000);
 }
