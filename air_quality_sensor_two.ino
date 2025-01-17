@@ -67,6 +67,7 @@ uint16_t AQI = 999;
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 
 void setup() {
+  delay(10000);  // needed on to ensure that the display is On before the code starts.
   Serial.begin(9600);
   Serial.println(F("Starting"));
   while (!Serial) {
@@ -84,8 +85,6 @@ void setup() {
 
   Serial.println(F("Starting - SGP-41"));
   sgp41_voc_nox_sensor.begin(Wire);
-
-  // // delay(10000);  // needed on to ensure that the display is On before the code starts.
 
   // int32_t index_offset;
   // int32_t learning_time_offset_hours;
